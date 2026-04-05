@@ -1,12 +1,18 @@
 /**
  * components/ClickChart.jsx
- * 7-day bar chart using Chart.js (no wrapper library).
+ * 7-day clicks-per-day bar chart using Chart.js.
  */
 import { useEffect, useRef } from 'react';
-import { Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController } from 'chart.js';
+import {
+  Chart,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  BarController,
+} from 'chart.js';
 
-// Register only what we need (tree-shaking)
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend, BarController);
+Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, BarController);
 
 export default function ClickChart({ analytics }) {
   const canvasRef = useRef(null);
@@ -15,84 +21,104 @@ export default function ClickChart({ analytics }) {
   useEffect(() => {
     if (!canvasRef.current || !analytics?.length) return;
 
-    // Destroy previous chart instance before re-creating
     if (chartRef.current) {
       chartRef.current.destroy();
+      chartRef.current = null;
     }
 
     const labels = analytics.map(d => {
-      const date = new Date(d.date + 'T00:00:00Z');
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const date = new Date(d.date + 'T00:00:00');
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     });
 
-    const values = analytics.map(d => d.clicks);
-    const maxVal = Math.max(...values, 1);
+    // Force integer — backend returns string or number depending on pg driver
+    const values = analytics.map(d => parseInt(d.clicks, 10) || 0);
+    const maxVal = Math.max(...values, 0);
+
+    // Y-axis ceiling: add ~25% headroom, minimum of 5 so axis isn't too cramped
+    const yMax = maxVal === 0 ? 5 : Math.ceil(maxVal * 1.3);
+
+    const bgColors     = values.map(v => (v === maxVal && v > 0) ? '#6366f1' : '#c7d2fe');
+    const borderColors = values.map(v => (v === maxVal && v > 0) ? '#4f46e5' : '#a5b4fc');
 
     chartRef.current = new Chart(canvasRef.current, {
       type: 'bar',
       data: {
         labels,
         datasets: [{
-          label: 'Clicks',
-          data:  values,
-          backgroundColor: values.map(v =>
-            v === maxVal ? 'rgba(99, 102, 241, 0.9)' : 'rgba(99, 102, 241, 0.18)'
-          ),
-          borderColor: values.map(v =>
-            v === maxVal ? 'rgba(99, 102, 241, 1)' : 'rgba(99, 102, 241, 0.4)'
-          ),
-          borderWidth: 2,
-          borderRadius: 6,
-          borderSkipped: false,
+          label:           'Clicks',
+          data:            values,
+          backgroundColor: bgColors,
+          borderColor:     borderColors,
+          borderWidth:     1.5,
+          borderRadius:    8,
+          borderSkipped:   false,
+          minBarLength:    4,
         }],
       },
       options: {
-        responsive: true,
+        responsive:          true,
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
           tooltip: {
-            backgroundColor: '#ffffff',
-            titleColor: '#4338ca',
-            bodyColor: '#374151',
-            borderColor: 'rgba(0,0,0,0.1)',
-            borderWidth: 1,
+            backgroundColor: '#1e1b4b',
+            titleColor:      '#c7d2fe',
+            bodyColor:       '#ffffff',
+            padding:         10,
+            cornerRadius:    8,
+            displayColors:   false,
             callbacks: {
               title: items => items[0].label,
-              label:  item => ` ${item.raw} click${item.raw !== 1 ? 's' : ''}`,
+              label: item  => ` ${item.raw} click${item.raw !== 1 ? 's' : ''}`,
             },
           },
         },
         scales: {
           x: {
-            grid:  { color: 'rgba(0,0,0,0.05)' },
-            ticks: { color: '#9ca3af', font: { family: 'JetBrains Mono', size: 11 } },
+            grid:   { display: false },
+            border: { display: false },
+            ticks:  {
+              color: '#6b7280',
+              font:  { family: "'JetBrains Mono', monospace", size: 11 },
+              maxRotation: 0,
+            },
           },
           y: {
             beginAtZero: true,
-            grid:  { color: 'rgba(0,0,0,0.05)' },
+            max:         yMax,        // hard ceiling — scales to real data
+            border:      { display: false },
+            grid:        { color: 'rgba(0,0,0,0.06)', drawTicks: false },
             ticks: {
-              color: '#9ca3af',
-              font: { family: 'JetBrains Mono', size: 11 },
-              stepSize: 1,
-              precision: 0,
+              color:    '#6b7280',
+              font:     { family: "'JetBrains Mono', monospace", size: 11 },
+              padding:  8,
+              // Only show whole-number ticks, max 6 labels
+              maxTicksLimit: 6,
+              callback: value => Number.isInteger(value) ? value : null,
             },
           },
         },
-        animation: {
-          duration: 500,
-          easing: 'easeOutQuart',
-        },
+        animation: { duration: 500, easing: 'easeOutQuart' },
       },
     });
 
-    return () => {
-      chartRef.current?.destroy();
-    };
+    return () => { chartRef.current?.destroy(); chartRef.current = null; };
   }, [analytics]);
 
+  if (!analytics?.length) {
+    return (
+      <div style={{
+        height: '240px', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', color: '#9ca3af', fontSize: '0.875rem',
+      }}>
+        No click data yet.
+      </div>
+    );
+  }
+
   return (
-    <div className="chart-wrapper" style={{ height: '220px', position: 'relative' }}>
+    <div style={{ height: '240px', position: 'relative', padding: '0.5rem 0' }}>
       <canvas ref={canvasRef} />
     </div>
   );
